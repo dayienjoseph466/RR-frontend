@@ -5,7 +5,8 @@ import Reserve from "./Reserve.jsx";
 import AdminLogin from "./AdminLogin.jsx";
 import Admin from "./Admin.jsx";
 
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// App.jsx
+export const API_URL = import.meta.env.VITE_API_URL || "https://rr-backend-98sd.onrender.com";
 
 export default function App() {
   const linkClass = ({ isActive }) => (isActive ? "active" : undefined);
