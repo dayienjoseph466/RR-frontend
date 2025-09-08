@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { API_URL } from "./App.jsx";
 
 /* local helpers */
@@ -11,7 +12,7 @@ function lsGetStore() {
 }
 function toISODateLocal(d = new Date()) {
   const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 10); // YYYY-MM-DD in local time
+  return new Date(d.getTime() - off).toISOString().slice(0, 10);
 }
 function normalizeDate(dstr) {
   if (!dstr) return "";
@@ -34,7 +35,7 @@ export default function Admin() {
     if (res.status === 401) {
       alert("Session expired. Please log in again.");
       localStorage.removeItem("token");
-      window.location.assign("/admin");
+      window.location.replace("#/parispublogin");
       return [];
     }
     if (!res.ok) {
@@ -52,7 +53,7 @@ export default function Admin() {
     if (res.status === 401) {
       alert("Session expired. Please log in again.");
       localStorage.removeItem("token");
-      window.location.assign("/admin");
+      window.location.replace("#/parispublogin");
       return [];
     }
     if (!res.ok) {
@@ -164,7 +165,6 @@ export default function Admin() {
       }
       throw new Error("No API");
     } catch {
-      // local delete fallback
       const store = lsGetStore();
       if (store[date]) {
         store[date] = store[date].filter((_, idx) => `ls_${date}_${idx}` !== id);
@@ -177,6 +177,12 @@ export default function Admin() {
   return (
     <section className="section">
       <div className="container">
+        {/* quick admin actions */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginBottom: 10 }}>
+          <Link to="/admin/menu" className="btn primary">Edit Menu</Link>
+          <Link to="/admin/events" className="btn primary">Edit Events</Link>
+        </div>
+
         <h2>Reservations</h2>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

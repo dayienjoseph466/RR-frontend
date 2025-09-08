@@ -1,24 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { API_URL } from "./App.jsx";
 
-/* ---------- helpers ---------- */
+/* helpers */
 function toISODate(d) {
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  return d.toISOString().slice(0, 10);
+}
+function tomorrowISO() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 function getStore() {
   try { return JSON.parse(localStorage.getItem("reservations")) || {}; }
   catch { return {}; }
 }
-function setStore(obj) {
-  localStorage.setItem("reservations", JSON.stringify(obj));
-}
+function setStore(obj) { localStorage.setItem("reservations", JSON.stringify(obj)); }
 function saveReservation(dateISO, record) {
   const store = getStore();
   if (!store[dateISO]) store[dateISO] = [];
   store[dateISO].push(record);
   setStore(store);
 }
-/* h:mm a.m./p.m. from "HH:MM" */
 function labelFromHHMM(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   const isPM = h >= 12;
@@ -26,7 +28,6 @@ function labelFromHHMM(hhmm) {
   const mm = String(m).padStart(2, "0");
   return `${hour12}:${mm} ${isPM ? "p.m." : "a.m."}`;
 }
-/* add minutes to "HH:MM" and return "HH:MM" */
 function addMinutesHHMM(hhmm, minutes) {
   const [h, m] = hhmm.split(":").map(Number);
   let total = h * 60 + m + minutes;
@@ -35,49 +36,102 @@ function addMinutesHHMM(hhmm, minutes) {
   const mm = String(total % 60).padStart(2, "0");
   return `${hh}:${mm}`;
 }
-
-/* slot step for confirmation end time: default 30, or override via VITE_SLOT_MINUTES */
+function isClosedDay(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  const dow = d.getDay();
+  return dow === 1 || dow === 2;
+}
 const STEP_MINUTES = Number(import.meta.env.VITE_SLOT_MINUTES || 30);
 
-/* ---------- component ---------- */
+/* side gallery data */
+const TABLE_IMAGE_COUNT = 10;
+const tableImageList = Array.from({ length: TABLE_IMAGE_COUNT }, (_, i) => i + 1);
+
+/* small helper component so we can fall back to .jpg if .png is not found */
+function TableImage({ n, alt }) {
+  const [src, setSrc] = useState(`/Pub${n}.png`);
+  return (
+    <img
+      src={src}
+      alt={alt}
+      onError={() => {
+        if (!src.endsWith(".jpg")) setSrc(`/Pub${n}.jpg`);
+      }}
+      style={{
+        width: "100%",
+        height: 120,
+        objectFit: "cover",
+        borderRadius: 10,
+        display: "block",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
+      }}
+    />
+  );
+}
+
 export default function Reserve() {
   const [people, setPeople] = useState(2);
   const [date, setDate] = useState(() => toISODate(new Date()));
-  const [time, setTime] = useState(""); // label shown in the input
+  const [time, setTime] = useState("");
+  const [durationSlots, setDurationSlots] = useState(1);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
-  // slots from server: { value: "HH:MM", label: "h:mm a.m./p.m." }
   const [slots, setSlots] = useState([]);
-  // disable buttons that turned full while user was on the page
   const [disabledSlots, setDisabledSlots] = useState(new Set());
 
-  // modal confirmation
   const [showModal, setShowModal] = useState(false);
   const [modalText, setModalText] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
-  // load slots
+  const [isClosed, setIsClosed] = useState(false);
+  const [hoursNote, setHoursNote] = useState("");
+
+  // NEW: trigger refresh after popup closes
+  const [refreshTick, setRefreshTick] = useState(0);
+  function refreshAvailability() {
+    setRefreshTick(t => t + 1);
+  }
+
   useEffect(() => {
     setTime("");
     setErrMsg("");
     setDisabledSlots(new Set());
 
-    fetch(`${API_URL}/api/availability?date=${date}&partySize=${people}`)
+    if (isClosedDay(date)) {
+      setIsClosed(true);
+      setHoursNote("Closed on Mondays and Tuesdays");
+    } else {
+      setIsClosed(false);
+      setHoursNote("");
+    }
+
+    fetch(`${API_URL}/api/availability?date=${date}&partySize=${people}&durationSlots=${durationSlots}`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => {
         const arr = Array.isArray(d.slots) ? d.slots : [];
         setSlots(arr.map(t => ({ value: t, label: labelFromHHMM(t) })));
+        if (arr.length === 0) {
+          setIsClosed(true);
+          if (!isClosedDay(date)) setHoursNote("Closed on this day");
+        }
       })
-      .catch(() => setSlots([]));
-  }, [date, people]);
+      .catch(() => {
+        setSlots([]);
+        setIsClosed(true);
+        if (!isClosedDay(date)) setHoursNote("Closed on this day");
+      });
+  }, [date, people, durationSlots, refreshTick]); // added refreshTick
 
   async function submit(e) {
     e.preventDefault();
     setErrMsg("");
+
+    if (isClosed) return setErrMsg("Closed on this day");
 
     const fullName = name.trim();
     const mail = email.trim();
@@ -91,13 +145,13 @@ export default function Reserve() {
     const dateISO = date;
     const serverTime = slots.find(s => s.label === time)?.value || time;
 
-    // local fallback save
     saveReservation(dateISO, {
       name: fullName,
       email: mail,
       phone: phoneNum,
       people: Number(people),
       time,
+      durationSlots,
       createdAt: Date.now(),
     });
 
@@ -113,13 +167,13 @@ export default function Reserve() {
           partySize: Number(people),
           date: dateISO,
           time: serverTime,
+          durationSlots: Number(durationSlots),
         }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // handle full slot: gray it out, clear selection
         if (res.status === 409 || /slot full/i.test(data?.message || "")) {
           setDisabledSlots(prev => new Set([...prev, serverTime]));
           setTime("");
@@ -128,8 +182,7 @@ export default function Reserve() {
         return;
       }
 
-      // success: build pop-up message using 30-minute window (or VITE_SLOT_MINUTES)
-      const endHHMM = addMinutesHHMM(serverTime, STEP_MINUTES);
+      const endHHMM = addMinutesHHMM(serverTime, STEP_MINUTES * Number(durationSlots));
       const startLabel = labelFromHHMM(serverTime);
       const endLabel = labelFromHHMM(endHHMM);
       setModalText(
@@ -137,7 +190,6 @@ export default function Reserve() {
       );
       setShowModal(true);
 
-      // clear inputs
       setTime("");
       setName("");
       setEmail("");
@@ -149,24 +201,37 @@ export default function Reserve() {
     }
   }
 
+  const durationChoices = [
+    { slots: 1, label: `${STEP_MINUTES} minutes` },
+    { slots: 2, label: `${STEP_MINUTES * 2} minutes` },
+    { slots: 3, label: `${STEP_MINUTES * 3} minutes` },
+    { slots: 4, label: `${STEP_MINUTES * 4} minutes` }
+  ];
+
   return (
     <section className="section">
       <div className="container">
-        <div className="reserve-wrap">
+        {/* make the form and the images sit side by side */}
+        <div
+          className="reserve-wrap"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 380px",
+            gap: 24,
+            alignItems: "start"
+          }}
+        >
           <form className="reserve-card" onSubmit={submit}>
             <h2>Make a reservation</h2>
 
+            {hoursNote && <div className="alert" style={{ marginBottom: 12 }}>{hoursNote}</div>}
             {errMsg && <div className="alert err" style={{ marginBottom: 12 }}>{errMsg}</div>}
 
-            {/* People */}
             <div className="field-row">
               <label className="field-label">People</label>
               <div className="field-ctrl">
-                <select
-                  value={people}
-                  onChange={(e) => setPeople(Number(e.target.value))}
-                >
-                  {[1,2,3,4,5,6,7,8].map(n => (
+                <select value={people} onChange={(e) => setPeople(Number(e.target.value))}>
+                  {Array.from({ length: 20 }, (_, i) => i + 1).map(n => (
                     <option key={n} value={n}>
                       {n} {n === 1 ? "person" : "people"}
                     </option>
@@ -175,16 +240,22 @@ export default function Reserve() {
               </div>
             </div>
 
-            {/* Date and Time */}
+            <div className="field-row">
+              <label className="field-label">Duration</label>
+              <div className="field-ctrl">
+                <select value={durationSlots} onChange={(e) => setDurationSlots(Number(e.target.value))}>
+                  {durationChoices.map(opt => (
+                    <option key={opt.slots} value={opt.slots}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="field-grid">
               <div className="field-col">
                 <label className="field-label">Date</label>
                 <div className="field-ctrl">
-                  <input
-                    type="date"
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                  />
+                  <input type="date" value={date} min={tomorrowISO()} onChange={(e) => setDate(e.target.value)} />
                 </div>
               </div>
 
@@ -202,7 +273,6 @@ export default function Reserve() {
               </div>
             </div>
 
-            {/* Slots */}
             <div className="slots">
               <div className="slots-label">Select a time</div>
               <div className="slots-grid">
@@ -231,62 +301,83 @@ export default function Reserve() {
               </div>
             </div>
 
-            {/* Info row */}
             <div className="mini-info">
               <div>
                 Experiences are available. <a href="#">See details</a>
               </div>
             </div>
 
-            {/* Contact fields */}
             <div className="field-grid tight">
               <div className="field-col">
                 <label className="field-label">Full name</label>
                 <div className="field-ctrl">
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Your name"
-                  />
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
                 </div>
               </div>
               <div className="field-col">
                 <label className="field-label">Email</label>
                 <div className="field-ctrl">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                  />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
                 </div>
               </div>
               <div className="field-col">
                 <label className="field-label">Phone</label>
                 <div className="field-ctrl">
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="555 123 4567"
-                  />
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555 123 4567" />
                 </div>
               </div>
             </div>
 
-            <button className="btn primary wide" type="submit" disabled={saving}>
+            <button className="btn primary wide" type="submit" disabled={saving || isClosed}>
               {saving ? "Saving..." : "Confirm Booking"}
             </button>
           </form>
+
+          {/* right side gallery with Pub1..Pub10 from public */}
+          <aside
+            aria-label="Table images"
+            style={{
+              background: "#fff",
+              borderRadius: 14,
+              padding: 16,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.06)"
+            }}
+          >
+            <h3 style={{ margin: "4px 0 12px", fontSize: 18 }}>Tables</h3>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, 1fr)",
+                gap: 12
+              }}
+            >
+              {tableImageList.map(n => (
+                <div key={n}>
+                  <TableImage n={n} alt={`Table ${n}`} />
+                  <div style={{ textAlign: "center", marginTop: 6, fontWeight: 600, fontSize: 14 }}>
+                    Table {n}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </aside>
         </div>
       </div>
 
-      {/* modal pop-up */}
       {showModal && (
         <div className="modal-backdrop" onClick={() => setShowModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginBottom: 8 }}>Booking confirmed</h3>
             <p style={{ marginBottom: 16 }}>{modalText}</p>
-            <button className="btn primary" onClick={() => setShowModal(false)}>OK</button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                setShowModal(false);
+                refreshAvailability(); // REFRESH after closing popup
+              }}
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

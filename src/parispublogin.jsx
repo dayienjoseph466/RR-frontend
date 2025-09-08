@@ -10,13 +10,18 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
 
   function onChange(e) {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+    if (msg) setMsg("");
   }
 
   async function submit(e) {
     e.preventDefault();
     setMsg("");
-    if (!form.user || !form.pass) {
+
+    const user = form.user.trim();
+    const pass = form.pass.trim();
+    if (!user || !pass) {
       setMsg("Please fill in both fields");
       return;
     }
@@ -26,7 +31,7 @@ export default function AdminLogin() {
       const res = await fetch(`${API_URL}/api/admin/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: form.user, password: form.pass })
+        body: JSON.stringify({ username: user, password: pass })
       });
 
       if (!res.ok) {
@@ -38,11 +43,14 @@ export default function AdminLogin() {
       const { token } = await res.json();
       localStorage.setItem("token", token);
       setMsg("Login successful");
-      // go to dashboard
-      navigate("/admin/dashboard", { replace: true });
-      // if navigate does not move you for any reason, use:
-      // window.location.assign("/admin/dashboard");
-    } catch (err) {
+
+      // redirect to the new dashboard route
+      navigate("/admindashboard", { replace: true });
+      // HashRouter hard redirect fallback
+      if (!location.hash || !location.hash.includes("/admindashboard")) {
+        window.location.replace("#/admindashboard");
+      }
+    } catch {
       setMsg("Network error");
     } finally {
       setLoading(false);
